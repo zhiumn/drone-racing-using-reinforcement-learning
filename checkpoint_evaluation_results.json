@@ -1,0 +1,8 @@
+[
+  {
+    "checkpoint": "log_dir/racing2/17555_ppo_drone.pth",
+    "avg_reward": 107.52929382093292,
+    "std_reward": 0.6564425149876995,
+    "max_reward": 108.07534311302221,
+    "avg_gates": 4.0,
+    "max_gates": 

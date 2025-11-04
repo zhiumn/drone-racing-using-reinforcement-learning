@@ -101,139 +101,97 @@ class FlyThruGateAvitary(BaseRLAviary):
         self.GATE_IDs = np.array([g1, g2, g3, g4])
 
     def _computeReward(self):
+        """Computes the current reward value.
+
+        Returns
+        -------
+        float
+            The reward.
+
+        """
         state = self._getDroneStateVector(0)
         rpy = state[7:10]
-        ang_vel = state[13:16]
-        vel = state[10:13]  # 增加速度資訊
-        
-        # 找到下一個未通過的門框
-        next_gate_idx = None
+        ang_vel=state[13:16]
         for i, key in enumerate(self.racing_setup.keys()):
-            if not self.passing_flag[i]:
-                next_gate_idx = i
-                gate_center = np.array(self.racing_setup[key][0])
-                cur_dist = np.linalg.norm(gate_center - state[:3])
-                prev_dist = np.linalg.norm(gate_center - self.prev_pos)
-                break
-        
-        # 如果沒有找到下一個門框，使用最後一個門框
-        if next_gate_idx is None:
-            keys = list(self.racing_setup.keys())
-            key = keys[-1]
-            gate_center = np.array(self.racing_setup[key][0])
-            cur_dist = np.linalg.norm(gate_center - state[:3])
-            prev_dist = np.linalg.norm(gate_center - self.prev_pos)
-        
+            if self.passing_flag[i]:
+                continue
+            cur_dist = np.linalg.norm(np.array(self.racing_setup[key][0]) - state[:3])
+            prev_dist = np.linalg.norm(np.array(self.racing_setup[key][0]) - self.prev_pos)
+            break
         self.prev_pos = state[:3]
-        
-        # 改進的進度獎勵計算
-        progress_reward = (prev_dist - cur_dist) * 2.0  # 增加權重
-        
-        # 增加對準門框中心的獎勵
-        alignment_reward = 0
-        if next_gate_idx is not None:
-            # 計算到門框中心的偏移
-            to_gate = gate_center - state[:3]
-            to_gate_norm = np.linalg.norm(to_gate)
-            if to_gate_norm > 1e-6:
-                to_gate_normalized = to_gate / to_gate_norm
-                
-                # 速度方向與門框方向的對齊度
-                vel_norm = np.linalg.norm(vel)
-                if vel_norm > 1e-6:
-                    vel_normalized = vel / vel_norm
-                    alignment = np.dot(vel_normalized, to_gate_normalized)
-                    alignment_reward = max(0, alignment) * 0.1
-            
-            # 距離懲罰（鼓勵接近門框中心）
-            if cur_dist < 3.0:  # 當接近門框時
-                center_offset = abs(state[2] - (self.offset + self.h/2))
-                alignment_reward -= center_offset * 0.05
-        
-        # 穩定性懲罰（減少不必要的角速度）
-        stability_penalty = -0.002 * np.linalg.norm(ang_vel)
-        
-        # 改進的基礎獎勵
-        on_way_reward = progress_reward + alignment_reward + stability_penalty
-        
-        # 檢測是否通過門框（放寬條件）
+        on_way_reward = prev_dist - cur_dist - 0.001 * np.linalg.norm(ang_vel)
         passing = False
         for i, key in enumerate(self.racing_setup.keys()):
             if self.passing_flag[i]:
                 continue
-            
-            # 使用更寬鬆的通過檢測範圍
-            margin = 0.2  # 增加容錯範圍
-            if (self.racing_setup[key][1][0] - margin < state[0] < 
-                self.racing_setup[key][2][0] + margin and
-                self.racing_setup[key][1][1] - margin < state[1] < 
-                self.racing_setup[key][1][1] + 2*self.offset + margin and
-                self.offset - margin < state[2] < self.offset + self.h + margin):
+            if self.racing_setup[key][1][0] < state[0] < self.racing_setup[key][2][0] and \
+                self.racing_setup[key][1][1] < state[1] < self.racing_setup[key][1][1] + 2*self.offset and \
+                self.offset < state[2] < self.offset + self.h:
                 passing = True
                 self.passing_flag[i] = True
                 break
-        
-        # 碰撞檢測
         self.collide = False
         for i in range(4):
-            contact_points = p.getContactPoints(
-                bodyA=self.DRONE_IDS[0],
-                bodyB=self.GATE_IDs[i],
-                physicsClientId=self.CLIENT
-            )
+            contact_points = p.getContactPoints(bodyA=self.DRONE_IDS[0],
+                       bodyB=self.GATE_IDs[i],
+                       physicsClientId=self.CLIENT
+                       )
             if len(contact_points) != 0:
                 self.collide = True
                 break
-        
-        # 調整獎勵值平衡
         if passing:
-            print("passing gate")
+            print("passing")
             print(state[:3])
             print(self.passing_flag)
-            # 遞增的通過獎勵
-            passed_count = sum(self.passing_flag)
-            reward = 10 + (passed_count * 5)
+            reward = 10
         elif self.collide:
             print("collide")
             print(state[:3])
-            reward = -15  # 增加碰撞懲罰
+            reward = -10
         else:
             reward = on_way_reward
-        
+
         return reward
 
-
+    ################################################################################
     def _computeTruncated(self):
+        """Computes the current truncated value.
+
+        Returns
+        -------
+        bool
+            Whether the current episode timed out.
+
+        """
         state = self._getDroneStateVector(0)
-        
-        # 稍微放寬邊界限制
-        if (abs(state[0]) > self.w/2 + 1.0 + 2*self.offset or 
-            state[1] > 7 or 
-            state[1] < -3 * self.offset or
-            state[2] > self.h + 3 * self.offset):
+        if (abs(state[0]) > self.w/2 + 0.5 + 2*self.offset or state[1] > 6 or state[1] < -2 * self.offset \
+        or state[3] > self.h + 2 * self.offset# Truncate when the drone is too far away
+        ):
             if self.passing_flag[0]:
-                print('truncated by boundary')
+                print('trucated')
                 print(state[:3])
             return True
-        
-        # 稍微放寬傾斜角度限制
-        if abs(state[7]) > 1.0 or abs(state[8]) > 1.0:  # 從0.78增加到1.0
+        if abs(state[7]) > 0.78 or abs(state[8]) > 0.78: # Truncate when the drone is too tilted
             if self.passing_flag[0]:
-                print('truncated by tilted')
+                print('trucated by tilted')
                 print(state[:3])
             return True
-        
         if self.step_counter/self.PYB_FREQ > self.EPISODE_LEN_SEC:
             return True
         else:
             return False
 
     def _computeTerminated(self):
-        # 保持原邏輯，但可以考慮增加成功訊息
-        if self.passing_flag[3] == True:
-            print("Successfully passed 3 gates!")
-            return True
-        elif self.collide == True:
+        """Computes the current done value.
+
+        Returns
+        -------
+        bool
+            Whether the current episode is done.
+
+        """
+        # just require to pass 3rd gate
+        if  self.passing_flag[2] == True or self.collide == True:
             return True
         else:
             return False

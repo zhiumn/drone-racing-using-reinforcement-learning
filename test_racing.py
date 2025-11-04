@@ -87,7 +87,7 @@ def test():
 
     #checkpoint_path = "log_dir/5/3577_ppo_drone.pth"
     #checkpoint_path = "log_dir/6/4436_ppo_drone.pth"
-    checkpoint_path = "log_dir/racing/72045_ppo_drone.pth"
+    checkpoint_path = "log_dir/racing2/116917_ppo_drone.pth"
     print("loading network from : " + checkpoint_path)
 
     ppo_agent.load(checkpoint_path)
